@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>1000HomeVibes Admin Panel</title>
+</head>
+<body>
+  <h1>📦 Product Manager – 1000HomeVibes</h1>
+  <button id="loadBtn">Reload from GitHub</button>
+  <button id="saveBtn">Save to GitHub</button>
+  <pre id="status"></pre>
+
+  <script>
+    const API_BASE = 'https://YOUR-GATEKEEPER-URL.onrender.com';
+    const ADMIN_SECRET = '';
+
+    let products = [];
+
+    async function loadFromGit() {
+      document.getElementById('status').textContent = 'Loading...';
+      try {
+        const res = await fetch(API_BASE + '/products');
+        const data = await res.json();
+        products = data.json || [];
+        document.getElementById('status').textContent = JSON.stringify(products, null, 2);
+      } catch (e) {
+        document.getElementById('status').textContent = 'Error loading';
+      }
+    }
+
+    async function saveToGit() {
+      const secret = ADMIN_SECRET || prompt('Enter Admin Secret:');
+      try {
+        const res = await fetch(API_BASE + '/update-products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-admin-secret': secret },
+          body: JSON.stringify(products)
+        });
+        if (!res.ok) throw new Error('Save failed');
+        document.getElementById('status').textContent = 'Saved ✅';
+      } catch (e) {
+        document.getElementById('status').textContent = 'Error saving';
+      }
+    }
+
+    document.getElementById('loadBtn').addEventListener('click', loadFromGit);
+    document.getElementById('saveBtn').addEventListener('click', saveToGit);
+  </script>
+</body>
+</html>
