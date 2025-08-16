@@ -1,82 +1,121 @@
-
-const express = require('express');
-const cors = require('cors');
-const axios = require('axios');
+import express from "express";
+import fetch from "node-fetch";
+import fs from "fs";
+import path from "path";
 
 const app = express();
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json());
 
-// CORS: lock this to your Netlify domain later
-app.use(cors({ origin: '*' }));
-
-// --- Environment Variables ---
+const PORT = process.env.PORT || 10000;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const REPO_OWNER   = process.env.REPO_OWNER   || 'IYAOAA';
-const REPO_NAME    = process.env.REPO_NAME    || '1000HomeVibes';
-const FILE_PATH    = process.env.FILE_PATH    || 'content/products/products.json';
-const BRANCH       = process.env.BRANCH       || 'main';
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
+const REPO = process.env.REPO; // e.g. "IYAOAA/1000HomeVibes"
+const FILE_PATH = process.env.FILE_PATH || "products.json";
+const CLICKS_FILE = "clicks.json"; // ✅ where we log clicks
 
-if (!GITHUB_TOKEN || !ADMIN_SECRET) {
-  console.error('❌ Missing required env vars: GITHUB_TOKEN and ADMIN_SECRET');
+// --- Utility to get file from GitHub ---
+async function getFile(filePath) {
+  const url = `https://api.github.com/repos/${REPO}/contents/${filePath}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `token ${GITHUB_TOKEN}` },
+  });
+  if (!res.ok) throw new Error(`GitHub fetch failed: ${res.status}`);
+  return res.json();
 }
 
-// Health check
-app.get('/health', (req, res) => res.json({ ok: true }));
+// --- Utility to save file to GitHub ---
+async function saveFile(filePath, content, message) {
+  const url = `https://api.github.com/repos/${REPO}/contents/${filePath}`;
+  let sha = null;
 
-// Fetch current products.json
-app.get('/products', async (req, res) => {
+  // get existing SHA if file exists
+  const res = await fetch(url, {
+    headers: { Authorization: `token ${GITHUB_TOKEN}` },
+  });
+  if (res.ok) {
+    const data = await res.json();
+    sha = data.sha;
+  }
+
+  const body = {
+    message,
+    content: Buffer.from(content).toString("base64"),
+    sha,
+  };
+
+  const saveRes = await fetch(url, {
+    method: "PUT",
+    headers: {
+      Authorization: `token ${GITHUB_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!saveRes.ok) throw new Error(`GitHub save failed: ${saveRes.status}`);
+  return saveRes.json();
+}
+
+// --- GET products.json ---
+app.get("/products", async (req, res) => {
   try {
-    const url = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${FILE_PATH}?ref=${BRANCH}`;
-    const gh = await axios.get(url, {
-      headers: { Authorization: `token ${GITHUB_TOKEN}`, 'User-Agent': 'empire-gatekeeper' }
-    });
-    const content = Buffer.from(gh.data.content, 'base64').toString('utf8');
-    res.json({ json: JSON.parse(content) });
-  } catch (err) {
-    console.error('GET /products error:', err?.response?.data || err.message);
-    res.status(500).json({ error: 'Failed to fetch products.json' });
+    const file = await getFile(FILE_PATH);
+    const content = Buffer.from(file.content, "base64").toString();
+    res.json(JSON.parse(content));
+  } catch (e) {
+    console.error("GET /products error:", e);
+    res.status(500).json({ error: "Failed to load products" });
   }
 });
 
-// Update products.json
-app.post('/update-products', async (req, res) => {
+// --- POST update-products ---
+app.post("/update-products", async (req, res) => {
+  if (req.headers["x-admin-secret"] !== ADMIN_SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
   try {
-    const secret = req.headers['x-admin-secret'];
-    if (!secret || secret !== ADMIN_SECRET) {
-      return res.status(401).json({ error: 'Unauthorized' });
+    const newContent = JSON.stringify(req.body, null, 2);
+    await saveFile(FILE_PATH, newContent, "Update products.json via Admin Panel");
+    res.json({ success: true });
+  } catch (e) {
+    console.error("POST /update-products error:", e);
+    res.status(500).json({ error: "Failed to save products" });
+  }
+});
+
+// --- ✅ NEW: POST track ---
+app.post("/track", async (req, res) => {
+  try {
+    const { product_id, timestamp } = req.body;
+    if (!product_id) return res.status(400).json({ error: "Missing product_id" });
+
+    // Load current clicks.json (or create empty)
+    let clicks = [];
+    try {
+      const file = await getFile(CLICKS_FILE);
+      const content = Buffer.from(file.content, "base64").toString();
+      clicks = JSON.parse(content);
+    } catch (e) {
+      clicks = []; // if file doesn’t exist yet
     }
 
-    const newJson = req.body;
-    if (!newJson) return res.status(400).json({ error: 'Missing body' });
+    // Add new click
+    clicks.push({ product_id, timestamp: timestamp || Date.now() });
 
-    // Get current file SHA
-    const getUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${FILE_PATH}?ref=${BRANCH}`;
-    const current = await axios.get(getUrl, {
-      headers: { Authorization: `token ${GITHUB_TOKEN}`, 'User-Agent': 'empire-gatekeeper' }
-    });
-    const sha = current.data.sha;
+    // Save back to GitHub
+    await saveFile(
+      CLICKS_FILE,
+      JSON.stringify(clicks, null, 2),
+      `Track click for ${product_id}`
+    );
 
-    // Commit new file
-    const putUrl = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/contents/${FILE_PATH}`;
-    const putBody = {
-      message: '🔄 Update products.json via Gatekeeper',
-      content: Buffer.from(JSON.stringify(newJson, null, 2)).toString('base64'),
-      sha,
-      branch: BRANCH
-    };
-
-    const updated = await axios.put(putUrl, putBody, {
-      headers: { Authorization: `token ${GITHUB_TOKEN}`, 'User-Agent': 'empire-gatekeeper' }
-    });
-
-    res.json({ ok: true, commit: updated.data.commit.sha });
-  } catch (err) {
-    console.error('POST /update-products error:', err?.response?.data || err.message);
-    const code = err?.response?.status || 500;
-    res.status(code).json({ error: 'Failed to update products.json', details: err?.response?.data || err.message });
+    res.json({ success: true });
+  } catch (e) {
+    console.error("POST /track error:", e);
+    res.status(500).json({ error: "Failed to track click" });
   }
 });
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`✅ Gatekeeper running on :${port}`));
+app.listen(PORT, () => {
+  console.log(`✅ Gatekeeper running on :${PORT}`);
+});
