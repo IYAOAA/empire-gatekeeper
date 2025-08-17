@@ -1,13 +1,16 @@
-const cors = require("cors");
-app.use(cors({
-  origin: "https://1000homevibes-site.netlify.app"  // allow your Netlify site
-}));
-
 const express = require("express");
+const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
 
 const app = express();
+
+// ✅ Enable CORS for your Netlify site
+app.use(cors({
+  origin: "https://1000homevibes-site.netlify.app"
+}));
+console.log("✅ CORS enabled for https://1000homevibes-site.netlify.app");
+
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
@@ -20,6 +23,7 @@ const CLICKS_FILE = "clicks.json"; // ✅ log clicks here
 // --- Utility to get file from GitHub ---
 async function getFile(filePath) {
   const url = `https://api.github.com/repos/${REPO}/contents/${filePath}`;
+  console.log("🔍 Fetching from GitHub:", url);
   const res = await fetch(url, {
     headers: { Authorization: `token ${GITHUB_TOKEN}` },
   });
