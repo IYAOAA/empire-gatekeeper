@@ -1,17 +1,14 @@
-const express = require("express");
 const cors = require("cors");
+const express = require("express");
 const fs = require("fs");
 const path = require("path");
+const fetch = require("node-fetch"); // ✅ make sure installed
 
 const app = express();
-
-// ✅ Enable CORS for your Netlify site
-app.use(cors({
-  origin: "https://1000homevibes-site.netlify.app"
-}));
-console.log("✅ CORS enabled for https://1000homevibes-site.netlify.app");
-
 app.use(express.json());
+app.use(cors({
+  origin: "https://1000homevibes-site.netlify.app" // allow your Netlify site
+}));
 
 const PORT = process.env.PORT || 10000;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
@@ -23,7 +20,6 @@ const CLICKS_FILE = "clicks.json"; // ✅ log clicks here
 // --- Utility to get file from GitHub ---
 async function getFile(filePath) {
   const url = `https://api.github.com/repos/${REPO}/contents/${filePath}`;
-  console.log("🔍 Fetching from GitHub:", url);
   const res = await fetch(url, {
     headers: { Authorization: `token ${GITHUB_TOKEN}` },
   });
@@ -91,7 +87,7 @@ app.post("/update-products", async (req, res) => {
   }
 });
 
-// --- ✅ NEW: POST track ---
+// --- POST track (log clicks) ---
 app.post("/track", async (req, res) => {
   try {
     const { product_id, timestamp } = req.body;
@@ -104,7 +100,7 @@ app.post("/track", async (req, res) => {
       const content = Buffer.from(file.content, "base64").toString();
       clicks = JSON.parse(content);
     } catch (e) {
-      clicks = []; // if file doesn’t exist yet
+      clicks = []; // file doesn’t exist yet
     }
 
     // Add new click
@@ -124,14 +120,19 @@ app.post("/track", async (req, res) => {
   }
 });
 
-// --- ✅ NEW: GET analytics ---
+// --- ✅ NEW: Analytics endpoint ---
 app.get("/analytics", async (req, res) => {
   try {
-    const file = await getFile(CLICKS_FILE);
-    const content = Buffer.from(file.content, "base64").toString();
-    const clicks = JSON.parse(content);
+    let clicks = [];
+    try {
+      const file = await getFile(CLICKS_FILE);
+      const content = Buffer.from(file.content, "base64").toString();
+      clicks = JSON.parse(content);
+    } catch (e) {
+      clicks = [];
+    }
 
-    // Count by product_id
+    // Aggregate stats per product
     const stats = {};
     clicks.forEach(c => {
       stats[c.product_id] = (stats[c.product_id] || 0) + 1;
@@ -139,11 +140,12 @@ app.get("/analytics", async (req, res) => {
 
     res.json({
       total: clicks.length,
-      stats
+      stats,
+      clicks // send raw history for trends
     });
   } catch (e) {
     console.error("GET /analytics error:", e);
-    res.json({ total: 0, stats: {} });
+    res.status(500).json({ error: "Failed to load analytics" });
   }
 });
 
