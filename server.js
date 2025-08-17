@@ -124,6 +124,29 @@ app.post("/track", async (req, res) => {
   }
 });
 
+// --- ✅ NEW: GET analytics ---
+app.get("/analytics", async (req, res) => {
+  try {
+    const file = await getFile(CLICKS_FILE);
+    const content = Buffer.from(file.content, "base64").toString();
+    const clicks = JSON.parse(content);
+
+    // Count by product_id
+    const stats = {};
+    clicks.forEach(c => {
+      stats[c.product_id] = (stats[c.product_id] || 0) + 1;
+    });
+
+    res.json({
+      total: clicks.length,
+      stats
+    });
+  } catch (e) {
+    console.error("GET /analytics error:", e);
+    res.json({ total: 0, stats: {} });
+  }
+});
+
 app.listen(PORT, () => {
   console.log(`✅ Gatekeeper running on :${PORT}`);
 });
