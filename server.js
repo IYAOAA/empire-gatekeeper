@@ -1,42 +1,56 @@
-const cors = require("cors");
+// --- Imports ---
 const express = require("express");
-const fetch = require("node-fetch"); // make sure installed
+const cors = require("cors");
+const fetch = require("node-fetch"); // ✅ ensure node-fetch is in dependencies
+require("dotenv").config();
 
 const app = express();
 app.use(express.json());
+
+// --- CORS (allow only your Netlify site) ---
 app.use(cors({
   origin: "https://1000homevibes-site.netlify.app"
 }));
 
+// --- Config ---
 const PORT = process.env.PORT || 10000;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY; // ✅ your OpenAI key
 const REPO = process.env.REPO; // e.g. "IYAOAA/1000HomeVibes"
 const FILE_PATH = process.env.FILE_PATH || "products.json";
 const CLICKS_FILE = "clicks.json";
 
-// --- Utility: fetch file from GitHub ---
+// --- Utility: Get file from GitHub ---
 async function getFile(filePath) {
   const url = `https://api.github.com/repos/${REPO}/contents/${filePath}`;
-  const res = await fetch(url, { headers: { Authorization: `token ${GITHUB_TOKEN}` } });
+  const res = await fetch(url, {
+    headers: { Authorization: `token ${GITHUB_TOKEN}` },
+  });
   if (!res.ok) throw new Error(`GitHub fetch failed: ${res.status}`);
   return res.json();
 }
 
-// --- Utility: save file to GitHub ---
+// --- Utility: Save file to GitHub ---
 async function saveFile(filePath, content, message) {
   const url = `https://api.github.com/repos/${REPO}/contents/${filePath}`;
   let sha = null;
-  const res = await fetch(url, { headers: { Authorization: `token ${GITHUB_TOKEN}` } });
+
+  // get existing SHA if file exists
+  const res = await fetch(url, {
+    headers: { Authorization: `token ${GITHUB_TOKEN}` },
+  });
   if (res.ok) {
     const data = await res.json();
     sha = data.sha;
   }
+
   const body = {
     message,
     content: Buffer.from(content).toString("base64"),
     sha,
   };
+
   const saveRes = await fetch(url, {
     method: "PUT",
     headers: {
@@ -45,6 +59,7 @@ async function saveFile(filePath, content, message) {
     },
     body: JSON.stringify(body),
   });
+
   if (!saveRes.ok) throw new Error(`GitHub save failed: ${saveRes.status}`);
   return saveRes.json();
 }
@@ -76,23 +91,26 @@ app.post("/update-products", async (req, res) => {
   }
 });
 
-// --- POST track (log clicks) ---
+// --- POST track clicks ---
 app.post("/track", async (req, res) => {
   try {
     const { product_id, timestamp } = req.body;
     if (!product_id) return res.status(400).json({ error: "Missing product_id" });
 
+    // Load current clicks.json (or create empty)
     let clicks = [];
     try {
       const file = await getFile(CLICKS_FILE);
       const content = Buffer.from(file.content, "base64").toString();
       clicks = JSON.parse(content);
     } catch (e) {
-      clicks = [];
+      clicks = []; // if file doesn’t exist yet
     }
 
+    // Add new click
     clicks.push({ product_id, timestamp: timestamp || Date.now() });
 
+    // Save back to GitHub
     await saveFile(
       CLICKS_FILE,
       JSON.stringify(clicks, null, 2),
@@ -106,77 +124,68 @@ app.post("/track", async (req, res) => {
   }
 });
 
-// --- ✅ NEW: Analytics endpoint with BI + AI-ready insights ---
-app.get("/analytics", async (req, res) => {
+// --- ✅ AI Auto-Update Products ---
+app.post("/auto-update", async (req, res) => {
+  if (req.headers["x-admin-secret"] !== ADMIN_SECRET) {
+    return res.status(403).json({ error: "Forbidden" });
+  }
   try {
-    let clicks = [];
+    // Call OpenAI API
+    const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a product curator for an Amazon affiliate website. Generate 2 trending home-related products in JSON format with keys: id, title, category (Air, Sleep, Body), image, description, buy_link (use example.com if none).",
+          },
+          { role: "user", content: "Generate products now." },
+        ],
+        temperature: 0.7,
+      }),
+    });
+
+    const data = await aiRes.json();
+    let text = data.choices?.[0]?.message?.content || "[]";
+    let newProducts = [];
+
     try {
-      const file = await getFile(CLICKS_FILE);
+      newProducts = JSON.parse(text);
+    } catch (e) {
+      console.error("AI parse error:", e, text);
+      newProducts = [];
+    }
+
+    // Load old products
+    let oldProducts = [];
+    try {
+      const file = await getFile(FILE_PATH);
       const content = Buffer.from(file.content, "base64").toString();
-      clicks = JSON.parse(content);
+      oldProducts = JSON.parse(content);
     } catch (e) {
-      clicks = [];
+      oldProducts = [];
     }
 
-    const stats = {};
-    clicks.forEach(c => {
-      stats[c.product_id] = (stats[c.product_id] || 0) + 1;
-    });
+    // Merge old + new
+    const merged = [...oldProducts, ...newProducts];
 
-    // Top & worst products
-    let topProduct = null, worstProduct = null;
-    let max = -Infinity, min = Infinity;
-    for (const [id, count] of Object.entries(stats)) {
-      if (count > max) { max = count; topProduct = id; }
-      if (count < min) { min = count; worstProduct = id; }
-    }
+    // Save to GitHub
+    await saveFile(FILE_PATH, JSON.stringify(merged, null, 2), "AI Auto-Update products.json");
 
-    // Category totals (need products.json to map categories)
-    let categories = {};
-    try {
-      const productFile = await getFile(FILE_PATH);
-      const productContent = Buffer.from(productFile.content, "base64").toString();
-      const products = JSON.parse(productContent);
-      products.forEach(p => {
-        if (stats[p.id]) {
-          categories[p.category] = (categories[p.category] || 0) + stats[p.id];
-        }
-      });
-    } catch (e) {
-      categories = {};
-    }
-
-    // Trends: group last 7 days
-    const now = Date.now();
-    const last7 = clicks.filter(c => now - c.timestamp <= 7*24*60*60*1000);
-    const daily = {};
-    last7.forEach(c => {
-      const d = new Date(c.timestamp).toISOString().split("T")[0];
-      daily[d] = (daily[d] || 0) + 1;
-    });
-
-    // --- AI-ready insight placeholder ---
-    const aiInsights = [
-      topProduct ? `🔥 ${topProduct} is your top performer with ${max} clicks.` : "No top product yet.",
-      worstProduct ? `⚠️ ${worstProduct} is underperforming with only ${min} clicks.` : "No weak product yet.",
-      Object.keys(categories).length > 0 ? `📊 ${Object.entries(categories).sort((a,b)=>b[1]-a[1])[0][0]} is your strongest category.` : "No category data yet.",
-      `📅 You had ${last7.length} clicks in the last 7 days.`
-    ];
-
-    res.json({
-      total: clicks.length,
-      stats,
-      clicks,      // raw history
-      categories,  // category totals
-      daily,       // last 7 days trends
-      insights: aiInsights
-    });
+    res.json({ success: true, products: merged });
   } catch (e) {
-    console.error("GET /analytics error:", e);
-    res.status(500).json({ error: "Failed to load analytics" });
+    console.error("POST /auto-update error:", e);
+    res.status(500).json({ error: "Failed AI auto-update" });
   }
 });
 
+// --- Start server ---
 app.listen(PORT, () => {
   console.log(`✅ Gatekeeper running on :${PORT}`);
 });
