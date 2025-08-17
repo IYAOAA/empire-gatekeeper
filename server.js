@@ -1,7 +1,6 @@
-import express from "express";
-import fetch from "node-fetch";
-import fs from "fs";
-import path from "path";
+const express = require("express");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 app.use(express.json());
@@ -11,7 +10,7 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
 const REPO = process.env.REPO; // e.g. "IYAOAA/1000HomeVibes"
 const FILE_PATH = process.env.FILE_PATH || "products.json";
-const CLICKS_FILE = "clicks.json"; // ✅ where we log clicks
+const CLICKS_FILE = "clicks.json"; // ✅ log clicks here
 
 // --- Utility to get file from GitHub ---
 async function getFile(filePath) {
