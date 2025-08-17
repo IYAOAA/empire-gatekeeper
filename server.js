@@ -1,3 +1,8 @@
+const cors = require("cors");
+app.use(cors({
+  origin: "https://1000homevibes-site.netlify.app"  // allow your Netlify site
+}));
+
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
