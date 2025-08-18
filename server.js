@@ -1,27 +1,29 @@
 // --- Imports ---
 const express = require("express");
 const cors = require("cors");
-const fetch = require("node-fetch"); // ✅ ensure node-fetch is in dependencies
+const fetch = require("node-fetch");
 require("dotenv").config();
 
 const app = express();
 app.use(express.json());
 
 // --- CORS (allow only your Netlify site) ---
-app.use(cors({
-  origin: "https://1000homevibes-site.netlify.app"
-}));
+app.use(
+  cors({
+    origin: "https://1000homevibes-site.netlify.app", // ✅ change if needed
+  })
+);
 
 // --- Config ---
 const PORT = process.env.PORT || 10000;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const ADMIN_SECRET = process.env.ADMIN_SECRET;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY; // ✅ your OpenAI key
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const REPO = process.env.REPO; // e.g. "IYAOAA/1000HomeVibes"
 const FILE_PATH = process.env.FILE_PATH || "products.json";
 const CLICKS_FILE = "clicks.json";
 
-// --- Utility: Get file from GitHub ---
+// --- Utility: GitHub Get File ---
 async function getFile(filePath) {
   const url = `https://api.github.com/repos/${REPO}/contents/${filePath}`;
   const res = await fetch(url, {
@@ -31,7 +33,7 @@ async function getFile(filePath) {
   return res.json();
 }
 
-// --- Utility: Save file to GitHub ---
+// --- Utility: GitHub Save File ---
 async function saveFile(filePath, content, message) {
   const url = `https://api.github.com/repos/${REPO}/contents/${filePath}`;
   let sha = null;
@@ -60,7 +62,10 @@ async function saveFile(filePath, content, message) {
     body: JSON.stringify(body),
   });
 
-  if (!saveRes.ok) throw new Error(`GitHub save failed: ${saveRes.status}`);
+  if (!saveRes.ok) {
+    const errorTxt = await saveRes.text();
+    throw new Error(`GitHub save failed: ${saveRes.status} - ${errorTxt}`);
+  }
   return saveRes.json();
 }
 
@@ -97,20 +102,17 @@ app.post("/track", async (req, res) => {
     const { product_id, timestamp } = req.body;
     if (!product_id) return res.status(400).json({ error: "Missing product_id" });
 
-    // Load current clicks.json (or create empty)
     let clicks = [];
     try {
       const file = await getFile(CLICKS_FILE);
       const content = Buffer.from(file.content, "base64").toString();
       clicks = JSON.parse(content);
-    } catch (e) {
-      clicks = []; // if file doesn’t exist yet
+    } catch {
+      clicks = [];
     }
 
-    // Add new click
     clicks.push({ product_id, timestamp: timestamp || Date.now() });
 
-    // Save back to GitHub
     await saveFile(
       CLICKS_FILE,
       JSON.stringify(clicks, null, 2),
@@ -130,7 +132,6 @@ app.post("/auto-update", async (req, res) => {
     return res.status(403).json({ error: "Forbidden" });
   }
   try {
-    // Call OpenAI API
     const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -143,22 +144,25 @@ app.post("/auto-update", async (req, res) => {
           {
             role: "system",
             content:
-              "You are a product curator for an Amazon affiliate website. Generate 2 trending home-related products in JSON format with keys: id, title, category (Air, Sleep, Body), image, description, buy_link (use example.com if none).",
+              "You are a product curator for an Amazon affiliate website. Respond ONLY with valid JSON array. Each object must include: id, title, category (Air, Sleep, Body), image, description, buy_link (use example.com if unknown).",
           },
-          { role: "user", content: "Generate products now." },
+          { role: "user", content: "Generate 2 trending home-related products." },
         ],
         temperature: 0.7,
       }),
     });
 
     const data = await aiRes.json();
-    let text = data.choices?.[0]?.message?.content || "[]";
-    let newProducts = [];
+    let text = data.choices?.[0]?.message?.content?.trim() || "[]";
 
+    // --- Ensure pure JSON (strip markdown) ---
+    text = text.replace(/```json|```/g, "").trim();
+
+    let newProducts = [];
     try {
       newProducts = JSON.parse(text);
     } catch (e) {
-      console.error("AI parse error:", e, text);
+      console.error("AI JSON parse error:", e, text);
       newProducts = [];
     }
 
@@ -168,15 +172,17 @@ app.post("/auto-update", async (req, res) => {
       const file = await getFile(FILE_PATH);
       const content = Buffer.from(file.content, "base64").toString();
       oldProducts = JSON.parse(content);
-    } catch (e) {
+    } catch {
       oldProducts = [];
     }
 
-    // Merge old + new
     const merged = [...oldProducts, ...newProducts];
 
-    // Save to GitHub
-    await saveFile(FILE_PATH, JSON.stringify(merged, null, 2), "AI Auto-Update products.json");
+    await saveFile(
+      FILE_PATH,
+      JSON.stringify(merged, null, 2),
+      "AI Auto-Update products.json"
+    );
 
     res.json({ success: true, products: merged });
   } catch (e) {
