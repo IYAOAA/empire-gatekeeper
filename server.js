@@ -10,6 +10,8 @@ app.use(express.json());
 // --- CORS (allow Netlify site + local testing for dev) ---
 app.use(cors({
   origin: ["https://1000homevibes-site.netlify.app", "http://localhost:5500"]
+   methods: ["GET", "POST", "PUT", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "x-admin-secret"]
 }));
 
 // --- Config ---
