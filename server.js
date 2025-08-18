@@ -7,9 +7,9 @@ require("dotenv").config();
 const app = express();
 app.use(express.json());
 
-// --- CORS (allow only your Netlify site) ---
+// --- CORS (allow Netlify site + local testing for dev) ---
 app.use(cors({
-  origin: "https://1000homevibes-site.netlify.app"
+  origin: ["https://1000homevibes-site.netlify.app", "http://localhost:5500"]
 }));
 
 // --- Config ---
@@ -66,7 +66,7 @@ app.get("/products", async (req, res) => {
   try {
     const file = await getFile(FILE_PATH);
     const content = Buffer.from(file.content, "base64").toString();
-    res.json(JSON.parse(content));
+    res.json(JSON.parse(content) || []); // ✅ always return array
   } catch (e) {
     console.error("GET /products error:", e);
     res.status(500).json({ error: "Failed to load products" });
@@ -99,7 +99,6 @@ app.post("/track", async (req, res) => {
     } catch {}
 
     clicks.push({ product_id, timestamp: timestamp || Date.now() });
-
     await saveFile(CLICKS_FILE, JSON.stringify(clicks, null, 2), `Track click for ${product_id}`);
 
     res.json({ success: true });
@@ -141,7 +140,6 @@ app.post("/auto-update", async (req, res) => {
     } catch {}
 
     const merged = [...oldProducts, ...newProducts];
-
     await saveFile(FILE_PATH, JSON.stringify(merged, null, 2), "AI Auto-Update products.json");
 
     res.json({ success: true, products: merged });
