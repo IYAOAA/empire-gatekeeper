@@ -21,7 +21,6 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 // --- GitHub Octokit instance ---
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
-// --- Helper: Load file from GitHub ---
 async function getFile(path) {
   try {
     const res = await octokit.repos.getContent({
@@ -35,7 +34,6 @@ async function getFile(path) {
   }
 }
 
-// --- Helper: Save file to GitHub ---
 async function saveFile(path, content, message) {
   const file = await getFile(path);
   const opts = {
@@ -46,7 +44,6 @@ async function saveFile(path, content, message) {
     content: Buffer.from(content).toString("base64"),
   };
   if (file?.sha) opts.sha = file.sha;
-
   await octokit.repos.createOrUpdateFileContents(opts);
 }
 
@@ -63,7 +60,7 @@ app.get("/products", async (req, res) => {
   }
 });
 
-// --- POST new product ---
+// --- POST product ---
 app.post("/products", async (req, res) => {
   if (req.headers["x-admin-secret"] !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
   try {
@@ -82,7 +79,7 @@ app.post("/products", async (req, res) => {
   }
 });
 
-// --- ✅ AI Auto-Update Products ---
+// --- ✅ AI Auto-Update ---
 app.post("/auto-update", async (req, res) => {
   if (req.headers["x-admin-secret"] !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
   try {
@@ -97,16 +94,9 @@ app.post("/auto-update", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: `You are a product curator for an Amazon affiliate website. 
-Return EXACTLY 2 home-related products in a JSON array. 
-Each product MUST have: 
-id (short unique string), title, category ("Air","Sleep","Body"), 
-image (URL), description, buy_link (URL). 
-Output ONLY raw JSON array, no text, no markdown. Example:
-[
-  {"id":"air-1","title":"Smart Air Purifier","category":"Air","image":"https://example.com/img1.jpg","description":"High-efficiency HEPA filter...","buy_link":"https://example.com/air1"},
-  {"id":"sleep-1","title":"Cooling Mattress Topper","category":"Sleep","image":"https://example.com/img2.jpg","description":"Breathable memory foam...","buy_link":"https://example.com/sleep1"}
-]`
+            content: `You are a product curator. Return EXACTLY 2 home-related products in a JSON array. 
+Each product must include id, title, category, image, description, buy_link. 
+Output ONLY raw JSON array.`
           },
           { role: "user", content: "Generate 2 trending home products now." },
         ],
@@ -124,13 +114,13 @@ Output ONLY raw JSON array, no text, no markdown. Example:
       text = text.replace(/```json|```/g, "").trim();
       newProducts = JSON.parse(text);
     } catch (err) {
-      console.error("❌ Failed to parse AI response:", err, text);
+      console.error("❌ Failed to parse AI:", err, text);
       newProducts = [];
     }
 
-    // --- 🚨 Fallback if AI fails ---
+    // --- 🚨 FORCE fallback if AI gave nothing ---
     if (!Array.isArray(newProducts) || newProducts.length === 0) {
-      console.warn("⚠️ AI returned empty list. Using fallback products.");
+      console.warn("⚠️ AI gave empty result. Using demo products.");
       newProducts = [
         {
           id: "demo-air-1",
@@ -151,12 +141,12 @@ Output ONLY raw JSON array, no text, no markdown. Example:
       ];
     }
 
+    // Merge with old products
     let oldProducts = [];
     try {
       const file = await getFile(FILE_PATH);
       oldProducts = JSON.parse(Buffer.from(file.content, "base64").toString());
     } catch {}
-
     const merged = [...oldProducts, ...newProducts];
 
     await saveFile(FILE_PATH, JSON.stringify(merged, null, 2), "AI Auto-Update products.json");
