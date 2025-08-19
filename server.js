@@ -62,16 +62,24 @@ app.get("/products", async (req, res) => {
 
 // --- POST product ---
 app.post("/products", async (req, res) => {
-  if (req.headers["x-admin-secret"] !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (req.headers["x-admin-secret"] !== ADMIN_SECRET)
+    return res.status(403).json({ error: "Forbidden" });
   try {
     const newProduct = req.body;
     let products = [];
     try {
       const file = await getFile(FILE_PATH);
-      if (file) products = JSON.parse(Buffer.from(file.content, "base64").toString());
+      if (file)
+        products = JSON.parse(
+          Buffer.from(file.content, "base64").toString()
+        );
     } catch {}
     products.push(newProduct);
-    await saveFile(FILE_PATH, JSON.stringify(products, null, 2), "Added product");
+    await saveFile(
+      FILE_PATH,
+      JSON.stringify(products, null, 2),
+      "Added product"
+    );
     res.json({ success: true, products });
   } catch (e) {
     console.error("POST /products error:", e);
@@ -81,8 +89,10 @@ app.post("/products", async (req, res) => {
 
 // --- ✅ AI Auto-Update ---
 app.post("/auto-update", async (req, res) => {
-  if (req.headers["x-admin-secret"] !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
-  try {
+  if (req.headers["x-admin-secret"] !== ADMIN_SECRET)
+    return res.status(403).json({ error: "Forbidden" });
+
+  async function fetchProductsFromAI() {
     const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -94,13 +104,18 @@ app.post("/auto-update", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: `You are a product curator. Return EXACTLY 2 home-related products in a JSON array. 
-Each product must include id, title, category, image, description, buy_link. 
-Output ONLY raw JSON array.`
+            content: `You are a product curator. 
+Return EXACTLY 2 different trending home-related products as a JSON array. 
+
+⚠️ RULES:
+- Each product MUST include: id, title, category, image, description, buy_link. 
+- Do NOT return an empty array.
+- Do NOT include markdown or code fences.
+- Do NOT explain, only output raw JSON array.`,
           },
-          { role: "user", content: "Generate 2 trending home products now." },
+          { role: "user", content: "Generate 2 fresh home products now." },
         ],
-        temperature: 0.3,
+        temperature: 0.5,
       }),
     });
 
@@ -114,21 +129,36 @@ Output ONLY raw JSON array.`
       text = text.replace(/```json|```/g, "").trim();
       newProducts = JSON.parse(text);
     } catch (err) {
-      console.error("❌ Failed to parse AI:", err, text);
+      console.error("❌ JSON parse failed:", err, text);
       newProducts = [];
     }
 
-    // --- 🚨 FORCE fallback if AI gave nothing ---
+    console.log(`✅ Parsed ${newProducts.length} products from AI`);
+    return newProducts;
+  }
+
+  try {
+    // 1st attempt
+    let newProducts = await fetchProductsFromAI();
+
+    // Retry safeguard if empty
     if (!Array.isArray(newProducts) || newProducts.length === 0) {
-      console.warn("⚠️ AI gave empty result. Using demo products.");
+      console.warn("⚠️ AI gave nothing. Retrying once...");
+      newProducts = await fetchProductsFromAI();
+    }
+
+    // Final safeguard: demo fallback
+    if (!Array.isArray(newProducts) || newProducts.length === 0) {
+      console.warn("⚠️ AI failed again. Using demo products.");
       newProducts = [
         {
           id: "demo-air-1",
           title: "Smart Home Air Purifier",
           category: "Air",
           image: "https://via.placeholder.com/300x200?text=Air+Purifier",
-          description: "High-efficiency HEPA filter removes 99% of airborne particles.",
-          buy_link: "https://example.com/demo-air"
+          description:
+            "High-efficiency HEPA filter removes 99% of airborne particles.",
+          buy_link: "https://example.com/demo-air",
         },
         {
           id: "demo-sleep-1",
@@ -136,8 +166,8 @@ Output ONLY raw JSON array.`
           category: "Sleep",
           image: "https://via.placeholder.com/300x200?text=Gel+Pillow",
           description: "Keeps you cool and comfortable throughout the night.",
-          buy_link: "https://example.com/demo-sleep"
-        }
+          buy_link: "https://example.com/demo-sleep",
+        },
       ];
     }
 
@@ -145,11 +175,17 @@ Output ONLY raw JSON array.`
     let oldProducts = [];
     try {
       const file = await getFile(FILE_PATH);
-      oldProducts = JSON.parse(Buffer.from(file.content, "base64").toString());
+      oldProducts = JSON.parse(
+        Buffer.from(file.content, "base64").toString()
+      );
     } catch {}
     const merged = [...oldProducts, ...newProducts];
 
-    await saveFile(FILE_PATH, JSON.stringify(merged, null, 2), "AI Auto-Update products.json");
+    await saveFile(
+      FILE_PATH,
+      JSON.stringify(merged, null, 2),
+      "AI Auto-Update products.json"
+    );
 
     res.json({ success: true, products: merged });
   } catch (e) {
@@ -158,4 +194,6 @@ Output ONLY raw JSON array.`
   }
 });
 
-app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
+app.listen(PORT, () =>
+  console.log(`✅ Server running on http://localhost:${PORT}`)
+);
