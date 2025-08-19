@@ -7,11 +7,9 @@ require("dotenv").config();
 const app = express();
 app.use(express.json());
 
-// --- CORS ---
+// --- CORS (allow only your Netlify site) ---
 app.use(cors({
-  origin: "https://1000homevibes-site.netlify.app",
-  methods: ["GET","POST","PUT","OPTIONS"],
-  allowedHeaders: ["Content-Type","x-admin-secret"]
+  origin: "https://1000homevibes-site.netlify.app"
 }));
 
 // --- Config ---
@@ -23,109 +21,162 @@ const REPO = process.env.REPO;
 const FILE_PATH = process.env.FILE_PATH || "products.json";
 const CLICKS_FILE = "clicks.json";
 
-// --- Utility: GitHub fetch/save ---
+// --- Utility: Get file from GitHub ---
 async function getFile(filePath) {
   const url = `https://api.github.com/repos/${REPO}/contents/${filePath}`;
-  const res = await fetch(url,{headers:{Authorization:`token ${GITHUB_TOKEN}`}});
-  if(!res.ok) throw new Error(`GitHub fetch failed: ${res.status}`);
+  const res = await fetch(url, {
+    headers: { Authorization: `token ${GITHUB_TOKEN}` },
+  });
+  if (!res.ok) throw new Error(`GitHub fetch failed: ${res.status}`);
   return res.json();
 }
 
-async function saveFile(filePath, content, message){
+// --- Utility: Save file to GitHub ---
+async function saveFile(filePath, content, message) {
   const url = `https://api.github.com/repos/${REPO}/contents/${filePath}`;
-  let sha=null;
-  const res = await fetch(url,{headers:{Authorization:`token ${GITHUB_TOKEN}`}});
-  if(res.ok){ const data = await res.json(); sha=data.sha; }
-  const body={ message, content:Buffer.from(content).toString("base64"), sha };
-  const saveRes = await fetch(url,{method:"PUT",headers:{Authorization:`token ${GITHUB_TOKEN}`,"Content-Type":"application/json"},body:JSON.stringify(body)});
-  if(!saveRes.ok) throw new Error(`GitHub save failed: ${saveRes.status}`);
+  let sha = null;
+
+  const res = await fetch(url, { headers: { Authorization: `token ${GITHUB_TOKEN}` } });
+  if (res.ok) {
+    const data = await res.json();
+    sha = data.sha;
+  }
+
+  const body = {
+    message,
+    content: Buffer.from(content).toString("base64"),
+    sha,
+  };
+
+  const saveRes = await fetch(url, {
+    method: "PUT",
+    headers: {
+      Authorization: `token ${GITHUB_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!saveRes.ok) throw new Error(`GitHub save failed: ${saveRes.status}`);
   return saveRes.json();
 }
 
-// --- GET /products ---
-app.get("/products", async (req,res)=>{
-  try{
+// --- GET products.json ---
+app.get("/products", async (req, res) => {
+  try {
     const file = await getFile(FILE_PATH);
-    const content = Buffer.from(file.content,"base64").toString();
+    const content = Buffer.from(file.content, "base64").toString();
     res.json(JSON.parse(content));
-  }catch(e){
-    console.error("GET /products error:",e);
-    res.status(500).json({error:"Failed to load products"});
+  } catch (e) {
+    console.error("GET /products error:", e);
+    res.status(500).json({ error: "Failed to load products" });
   }
 });
 
-// --- POST /update-products ---
-app.post("/update-products", async(req,res)=>{
-  if(req.headers["x-admin-secret"]!==ADMIN_SECRET) return res.status(403).json({error:"Forbidden"});
-  try{
-    const newContent = JSON.stringify(req.body,null,2);
-    await saveFile(FILE_PATH,newContent,"Update products.json via Admin Panel");
-    res.json({success:true});
-  }catch(e){
-    console.error("POST /update-products error:",e);
-    res.status(500).json({error:"Failed to save products"});
+// --- POST update-products ---
+app.post("/update-products", async (req, res) => {
+  if (req.headers["x-admin-secret"] !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  try {
+    const newContent = JSON.stringify(req.body, null, 2);
+    await saveFile(FILE_PATH, newContent, "Update products.json via Admin Panel");
+    res.json({ success: true });
+  } catch (e) {
+    console.error("POST /update-products error:", e);
+    res.status(500).json({ error: "Failed to save products" });
   }
 });
 
-// --- POST /track ---
-app.post("/track", async(req,res)=>{
-  try{
-    const {product_id,timestamp} = req.body;
-    if(!product_id) return res.status(400).json({error:"Missing product_id"});
-    let clicks=[];
-    try{ const file = await getFile(CLICKS_FILE); clicks=JSON.parse(Buffer.from(file.content,"base64").toString()); } catch{}
-    clicks.push({product_id,timestamp:timestamp||Date.now()});
-    await saveFile(CLICKS_FILE,JSON.stringify(clicks,null,2),`Track click for ${product_id}`);
-    res.json({success:true});
-  }catch(e){
-    console.error("POST /track error:",e);
-    res.status(500).json({error:"Failed to track click"});
+// --- POST track clicks ---
+app.post("/track", async (req, res) => {
+  try {
+    const { product_id, timestamp } = req.body;
+    if (!product_id) return res.status(400).json({ error: "Missing product_id" });
+
+    let clicks = [];
+    try {
+      const file = await getFile(CLICKS_FILE);
+      clicks = JSON.parse(Buffer.from(file.content, "base64").toString());
+    } catch {}
+
+    clicks.push({ product_id, timestamp: timestamp || Date.now() });
+
+    await saveFile(CLICKS_FILE, JSON.stringify(clicks, null, 2), `Track click for ${product_id}`);
+
+    res.json({ success: true });
+  } catch (e) {
+    console.error("POST /track error:", e);
+    res.status(500).json({ error: "Failed to track click" });
   }
 });
 
-// --- POST /auto-update ---
-app.post("/auto-update", async(req,res)=>{
-  if(req.headers["x-admin-secret"]!==ADMIN_SECRET) return res.status(403).json({error:"Forbidden"});
-  try{
-    const aiRes = await fetch("https://api.openai.com/v1/chat/completions",{
-      method:"POST",
-      headers:{ "Content-Type":"application/json", Authorization:`Bearer ${OPENAI_API_KEY}` },
+// --- ✅ AI Auto-Update Products ---
+app.post("/auto-update", async (req, res) => {
+  if (req.headers["x-admin-secret"] !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  try {
+    const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
       body: JSON.stringify({
-        model:"gpt-4o-mini",
-        messages:[
-          {role:"system",content:"You are a product curator for an Amazon affiliate website. Generate 2 trending home-related products in JSON format with keys: id,title,category(Air,Sleep,Body),image,description,buy_link(use example.com if none)."},
-          {role:"user",content:"Generate products now."}
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: "You are a product curator for an Amazon affiliate website. Generate 2 trending home-related products in JSON format with keys: id, title, category (Air, Sleep, Body), image, description, buy_link (use example.com if none)." },
+          { role: "user", content: "Generate products now." },
         ],
-        temperature:0.7
-      })
+        temperature: 0.7,
+      }),
     });
+
     const data = await aiRes.json();
     let text = data.choices?.[0]?.message?.content || "[]";
-    let newProducts=[];
-    try{ newProducts=JSON.parse(text); } catch{ newProducts=[]; }
-    let oldProducts=[];
-    try{ const file = await getFile(FILE_PATH); oldProducts = JSON.parse(Buffer.from(file.content,"base64").toString()); } catch{}
-    const merged = [...oldProducts,...newProducts];
-    await saveFile(FILE_PATH,JSON.stringify(merged,null,2),"AI Auto-Update products.json");
-    res.json({success:true,products:merged});
-  }catch(e){
-    console.error("POST /auto-update error:",e);
-    res.status(500).json({error:"Failed AI auto-update"});
+    let newProducts = [];
+    try { newProducts = JSON.parse(text); } catch { newProducts = []; }
+
+    let oldProducts = [];
+    try {
+      const file = await getFile(FILE_PATH);
+      oldProducts = JSON.parse(Buffer.from(file.content, "base64").toString());
+    } catch {}
+
+    const merged = [...oldProducts, ...newProducts];
+
+    await saveFile(FILE_PATH, JSON.stringify(merged, null, 2), "AI Auto-Update products.json");
+
+    res.json({ success: true, products: merged });
+  } catch (e) {
+    console.error("POST /auto-update error:", e);
+    res.status(500).json({ error: "Failed AI auto-update" });
   }
 });
 
-// --- GET /analytics ---
-app.get("/analytics", async(req,res)=>{
-  try{
-    let products=[]; try{ const file = await getFile(FILE_PATH); products=JSON.parse(Buffer.from(file.content,"base64").toString()); } catch{}
-    let clicks=[]; try{ const file = await getFile(CLICKS_FILE); clicks=JSON.parse(Buffer.from(file.content,"base64").toString()); } catch{}
-    const stats={}; clicks.forEach(c=>stats[c.product_id]=(stats[c.product_id]||0)+1);
-    res.json({stats,clicks,products});
-  }catch(e){
-    console.error("GET /analytics error:",e);
-    res.status(500).json({error:"Failed to load analytics"});
+// --- ✅ Analytics Endpoint ---
+app.get("/analytics", async (req, res) => {
+  try {
+    let products = [];
+    try { 
+      const file = await getFile(FILE_PATH);
+      products = JSON.parse(Buffer.from(file.content, "base64").toString());
+    } catch {}
+
+    let clicks = [];
+    try {
+      const file = await getFile(CLICKS_FILE);
+      clicks = JSON.parse(Buffer.from(file.content, "base64").toString());
+    } catch {}
+
+    const stats = {};
+    clicks.forEach(c => stats[c.product_id] = (stats[c.product_id]||0)+1);
+
+    res.json({ stats, clicks, products });
+  } catch (e) {
+    console.error("GET /analytics error:", e);
+    res.status(500).json({ error: "Failed to load analytics" });
   }
 });
 
 // --- Start server ---
-app.listen(PORT,()=>{console.log(`✅ Gatekeeper running on :${PORT}`);});
+app.listen(PORT, () => {
+  console.log(`✅ Gatekeeper running on :${PORT}`);
+});
