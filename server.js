@@ -64,22 +64,16 @@ app.get("/products", async (req, res) => {
 app.post("/products", async (req, res) => {
   if (req.headers["x-admin-secret"] !== ADMIN_SECRET)
     return res.status(403).json({ error: "Forbidden" });
+
   try {
     const newProduct = req.body;
     let products = [];
     try {
       const file = await getFile(FILE_PATH);
-      if (file)
-        products = JSON.parse(
-          Buffer.from(file.content, "base64").toString()
-        );
+      if (file) products = JSON.parse(Buffer.from(file.content, "base64").toString());
     } catch {}
     products.push(newProduct);
-    await saveFile(
-      FILE_PATH,
-      JSON.stringify(products, null, 2),
-      "Added product"
-    );
+    await saveFile(FILE_PATH, JSON.stringify(products, null, 2), "Added product");
     res.json({ success: true, products });
   } catch (e) {
     console.error("POST /products error:", e);
@@ -92,7 +86,7 @@ app.post("/auto-update", async (req, res) => {
   if (req.headers["x-admin-secret"] !== ADMIN_SECRET)
     return res.status(403).json({ error: "Forbidden" });
 
-  async function fetchProductsFromAI() {
+  try {
     const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -104,16 +98,19 @@ app.post("/auto-update", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: `You are a product curator. 
-Return EXACTLY 2 different trending home-related products as a JSON array. 
+            content: `You are a smart product curator.  
+Return ONLY a JSON array of exactly 2 **trending, realistic home-related products**.  
+Each product must strictly include these fields:  
+- id (short unique string, no spaces)  
+- title (short, catchy name)  
+- category (choose from: Furniture, Kitchen, Tech, Decor, Air, Sleep, Cleaning)  
+- image (valid https image URL)  
+- description (1 short, engaging sentence)  
+- buy_link (valid https product URL)  
 
-⚠️ RULES:
-- Each product MUST include: id, title, category, image, description, buy_link. 
-- Do NOT return an empty array.
-- Do NOT include markdown or code fences.
-- Do NOT explain, only output raw JSON array.`,
+⚠️ Do not include any extra text, explanation, or markdown. Output must be a raw JSON array only.`
           },
-          { role: "user", content: "Generate 2 fresh home products now." },
+          { role: "user", content: "Generate 2 trending home products now." },
         ],
         temperature: 0.5,
       }),
@@ -129,35 +126,20 @@ Return EXACTLY 2 different trending home-related products as a JSON array.
       text = text.replace(/```json|```/g, "").trim();
       newProducts = JSON.parse(text);
     } catch (err) {
-      console.error("❌ JSON parse failed:", err, text);
+      console.error("❌ Failed to parse AI:", err, text);
       newProducts = [];
     }
 
-    console.log(`✅ Parsed ${newProducts.length} products from AI`);
-    return newProducts;
-  }
-
-  try {
-    // 1st attempt
-    let newProducts = await fetchProductsFromAI();
-
-    // Retry safeguard if empty
+    // --- 🚨 Fallback if AI gave nothing ---
     if (!Array.isArray(newProducts) || newProducts.length === 0) {
-      console.warn("⚠️ AI gave nothing. Retrying once...");
-      newProducts = await fetchProductsFromAI();
-    }
-
-    // Final safeguard: demo fallback
-    if (!Array.isArray(newProducts) || newProducts.length === 0) {
-      console.warn("⚠️ AI failed again. Using demo products.");
+      console.warn("⚠️ AI gave empty result. Using demo products.");
       newProducts = [
         {
           id: "demo-air-1",
           title: "Smart Home Air Purifier",
           category: "Air",
           image: "https://via.placeholder.com/300x200?text=Air+Purifier",
-          description:
-            "High-efficiency HEPA filter removes 99% of airborne particles.",
+          description: "High-efficiency HEPA filter removes 99% of airborne particles.",
           buy_link: "https://example.com/demo-air",
         },
         {
@@ -175,17 +157,11 @@ Return EXACTLY 2 different trending home-related products as a JSON array.
     let oldProducts = [];
     try {
       const file = await getFile(FILE_PATH);
-      oldProducts = JSON.parse(
-        Buffer.from(file.content, "base64").toString()
-      );
+      oldProducts = JSON.parse(Buffer.from(file.content, "base64").toString());
     } catch {}
     const merged = [...oldProducts, ...newProducts];
 
-    await saveFile(
-      FILE_PATH,
-      JSON.stringify(merged, null, 2),
-      "AI Auto-Update products.json"
-    );
+    await saveFile(FILE_PATH, JSON.stringify(merged, null, 2), "AI Auto-Update products.json");
 
     res.json({ success: true, products: merged });
   } catch (e) {
@@ -194,6 +170,4 @@ Return EXACTLY 2 different trending home-related products as a JSON array.
   }
 });
 
-app.listen(PORT, () =>
-  console.log(`✅ Server running on http://localhost:${PORT}`)
-);
+app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
