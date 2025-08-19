@@ -1,111 +1,84 @@
-// --- Imports ---
-const express = require("express");
-const cors = require("cors");
-const fetch = require("node-fetch");
-require("dotenv").config();
+import express from "express";
+import fetch from "node-fetch";
+import dotenv from "dotenv";
+import cors from "cors";
+import { Octokit } from "@octokit/rest";
 
+dotenv.config();
 const app = express();
 app.use(express.json());
-
-// --- CORS (allow only your Netlify site) ---
-app.use(cors({
-  origin: "https://1000homevibes-site.netlify.app"
-}));
+app.use(cors());
 
 // --- Config ---
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 5000;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
-const ADMIN_SECRET = process.env.ADMIN_SECRET;
+const REPO_OWNER = "IYAOAA";
+const REPO_NAME = "EverlastingMemories";
+const FILE_PATH = "data/products.json";
+const ADMIN_SECRET = process.env.ADMIN_SECRET || "supersecretkey";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const REPO = process.env.REPO;
-const FILE_PATH = process.env.FILE_PATH || "products.json";
-const CLICKS_FILE = "clicks.json";
 
-// --- Utility: Get file from GitHub ---
-async function getFile(filePath) {
-  const url = `https://api.github.com/repos/${REPO}/contents/${filePath}`;
-  const res = await fetch(url, {
-    headers: { Authorization: `token ${GITHUB_TOKEN}` },
-  });
-  if (!res.ok) throw new Error(`GitHub fetch failed: ${res.status}`);
-  return res.json();
+// --- GitHub Octokit instance ---
+const octokit = new Octokit({ auth: GITHUB_TOKEN });
+
+// --- Helper: Load file from GitHub ---
+async function getFile(path) {
+  try {
+    const res = await octokit.repos.getContent({
+      owner: REPO_OWNER,
+      repo: REPO_NAME,
+      path,
+    });
+    return res.data;
+  } catch {
+    return null;
+  }
 }
 
-// --- Utility: Save file to GitHub ---
-async function saveFile(filePath, content, message) {
-  const url = `https://api.github.com/repos/${REPO}/contents/${filePath}`;
-  let sha = null;
-
-  const res = await fetch(url, { headers: { Authorization: `token ${GITHUB_TOKEN}` } });
-  if (res.ok) {
-    const data = await res.json();
-    sha = data.sha;
-  }
-
-  const body = {
+// --- Helper: Save file to GitHub ---
+async function saveFile(path, content, message) {
+  const file = await getFile(path);
+  const opts = {
+    owner: REPO_OWNER,
+    repo: REPO_NAME,
+    path,
     message,
     content: Buffer.from(content).toString("base64"),
-    sha,
   };
+  if (file?.sha) opts.sha = file.sha;
 
-  const saveRes = await fetch(url, {
-    method: "PUT",
-    headers: {
-      Authorization: `token ${GITHUB_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!saveRes.ok) throw new Error(`GitHub save failed: ${saveRes.status}`);
-  return saveRes.json();
+  await octokit.repos.createOrUpdateFileContents(opts);
 }
 
-// --- GET products.json ---
+// --- GET products ---
 app.get("/products", async (req, res) => {
   try {
     const file = await getFile(FILE_PATH);
-    const content = Buffer.from(file.content, "base64").toString();
-    res.json(JSON.parse(content));
+    if (!file) return res.json([]);
+    const data = Buffer.from(file.content, "base64").toString();
+    res.json(JSON.parse(data));
   } catch (e) {
     console.error("GET /products error:", e);
     res.status(500).json({ error: "Failed to load products" });
   }
 });
 
-// --- POST update-products ---
-app.post("/update-products", async (req, res) => {
+// --- POST new product ---
+app.post("/products", async (req, res) => {
   if (req.headers["x-admin-secret"] !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
   try {
-    const newContent = JSON.stringify(req.body, null, 2);
-    await saveFile(FILE_PATH, newContent, "Update products.json via Admin Panel");
-    res.json({ success: true });
-  } catch (e) {
-    console.error("POST /update-products error:", e);
-    res.status(500).json({ error: "Failed to save products" });
-  }
-});
-
-// --- POST track clicks ---
-app.post("/track", async (req, res) => {
-  try {
-    const { product_id, timestamp } = req.body;
-    if (!product_id) return res.status(400).json({ error: "Missing product_id" });
-
-    let clicks = [];
+    const newProduct = req.body;
+    let products = [];
     try {
-      const file = await getFile(CLICKS_FILE);
-      clicks = JSON.parse(Buffer.from(file.content, "base64").toString());
+      const file = await getFile(FILE_PATH);
+      if (file) products = JSON.parse(Buffer.from(file.content, "base64").toString());
     } catch {}
-
-    clicks.push({ product_id, timestamp: timestamp || Date.now() });
-
-    await saveFile(CLICKS_FILE, JSON.stringify(clicks, null, 2), `Track click for ${product_id}`);
-
-    res.json({ success: true });
+    products.push(newProduct);
+    await saveFile(FILE_PATH, JSON.stringify(products, null, 2), "Added product");
+    res.json({ success: true, products });
   } catch (e) {
-    console.error("POST /track error:", e);
-    res.status(500).json({ error: "Failed to track click" });
+    console.error("POST /products error:", e);
+    res.status(500).json({ error: "Failed to save product" });
   }
 });
 
@@ -122,27 +95,60 @@ app.post("/auto-update", async (req, res) => {
       body: JSON.stringify({
         model: "gpt-4o-mini",
         messages: [
-          { role: "system", content: "You are a product curator for an Amazon affiliate website. Generate 2 trending home-related products in JSON format with keys: id, title, category (Air, Sleep, Body), image, description, buy_link (use example.com if none)." },
-          { role: "user", content: "Generate products now." },
+          {
+            role: "system",
+            content: `You are a product curator for an Amazon affiliate website. 
+Return EXACTLY 2 home-related products in a JSON array. 
+Each product MUST have: 
+id (short unique string), title, category ("Air","Sleep","Body"), 
+image (URL), description, buy_link (URL). 
+Output ONLY raw JSON array, no text, no markdown. Example:
+[
+  {"id":"air-1","title":"Smart Air Purifier","category":"Air","image":"https://example.com/img1.jpg","description":"High-efficiency HEPA filter...","buy_link":"https://example.com/air1"},
+  {"id":"sleep-1","title":"Cooling Mattress Topper","category":"Sleep","image":"https://example.com/img2.jpg","description":"Breathable memory foam...","buy_link":"https://example.com/sleep1"}
+]`
+          },
+          { role: "user", content: "Generate 2 trending home products now." },
         ],
-        temperature: 0.7,
+        temperature: 0.3,
       }),
     });
 
     const data = await aiRes.json();
     let text = data.choices?.[0]?.message?.content || "[]";
 
-    // --- Debug raw AI response ---
     console.log("🤖 AI raw response:", text);
 
     let newProducts = [];
     try {
-      // Clean AI response if wrapped in ```json ... ```
       text = text.replace(/```json|```/g, "").trim();
       newProducts = JSON.parse(text);
     } catch (err) {
       console.error("❌ Failed to parse AI response:", err, text);
       newProducts = [];
+    }
+
+    // --- 🚨 Fallback if AI fails ---
+    if (!Array.isArray(newProducts) || newProducts.length === 0) {
+      console.warn("⚠️ AI returned empty list. Using fallback products.");
+      newProducts = [
+        {
+          id: "demo-air-1",
+          title: "Smart Home Air Purifier",
+          category: "Air",
+          image: "https://via.placeholder.com/300x200?text=Air+Purifier",
+          description: "High-efficiency HEPA filter removes 99% of airborne particles.",
+          buy_link: "https://example.com/demo-air"
+        },
+        {
+          id: "demo-sleep-1",
+          title: "Cooling Gel Memory Foam Pillow",
+          category: "Sleep",
+          image: "https://via.placeholder.com/300x200?text=Gel+Pillow",
+          description: "Keeps you cool and comfortable throughout the night.",
+          buy_link: "https://example.com/demo-sleep"
+        }
+      ];
     }
 
     let oldProducts = [];
@@ -162,32 +168,4 @@ app.post("/auto-update", async (req, res) => {
   }
 });
 
-// --- ✅ Analytics Endpoint ---
-app.get("/analytics", async (req, res) => {
-  try {
-    let products = [];
-    try { 
-      const file = await getFile(FILE_PATH);
-      products = JSON.parse(Buffer.from(file.content, "base64").toString());
-    } catch {}
-
-    let clicks = [];
-    try {
-      const file = await getFile(CLICKS_FILE);
-      clicks = JSON.parse(Buffer.from(file.content, "base64").toString());
-    } catch {}
-
-    const stats = {};
-    clicks.forEach(c => stats[c.product_id] = (stats[c.product_id]||0)+1);
-
-    res.json({ stats, clicks, products });
-  } catch (e) {
-    console.error("GET /analytics error:", e);
-    res.status(500).json({ error: "Failed to load analytics" });
-  }
-});
-
-// --- Start server ---
-app.listen(PORT, () => {
-  console.log(`✅ Gatekeeper running on :${PORT}`);
-});
+app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
