@@ -7,10 +7,11 @@
     "start": "node server.js"
   },
   "dependencies": {
+    "@octokit/rest": "^22.0.0",
     "axios": "^1.7.2",
     "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
     "express": "^4.19.2",
-    "node-fetch": "^2.6.7",
-    "dotenv": "^16.3.1"
+    "node-fetch": "^2.6.7"
   }
 }
