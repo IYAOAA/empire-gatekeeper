@@ -62,7 +62,8 @@ app.get("/products", async (req, res) => {
 
 // --- POST product ---
 app.post("/products", async (req, res) => {
-  if (req.headers["x-admin-secret"] !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (req.headers["x-admin-secret"] !== ADMIN_SECRET)
+    return res.status(403).json({ error: "Forbidden" });
   try {
     const newProduct = req.body;
     let products = [];
@@ -81,7 +82,8 @@ app.post("/products", async (req, res) => {
 
 // --- ✅ AI Auto-Update ---
 app.post("/auto-update", async (req, res) => {
-  if (req.headers["x-admin-secret"] !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
+  if (req.headers["x-admin-secret"] !== ADMIN_SECRET)
+    return res.status(403).json({ error: "Forbidden" });
   try {
     const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -94,22 +96,14 @@ app.post("/auto-update", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: `You are a product curator. Return EXACTLY 2 unique home-related products in a JSON array.
-Each product MUST include: 
-- id (short unique string, use dashes not spaces),
-- title,
-- category,
-- image (direct link, not base64),
-- description (max 25 words),
-- buy_link (valid https link).
-
-Rules:
-- IDs must never duplicate across runs.
-- Output ONLY the raw JSON array, no extra text.`,
+            content: `You are a strict JSON generator. 
+Return ONLY a JSON array with exactly 2 home-related products. 
+Each object MUST have: id, title, category, image, description, buy_link. 
+Do not include explanations, comments, or markdown fences.`,
           },
           { role: "user", content: "Generate 2 trending home products now." },
         ],
-        temperature: 0.4,
+        temperature: 0.2,
       }),
     });
 
@@ -137,7 +131,7 @@ Rules:
           category: "Air",
           image: "https://via.placeholder.com/300x200?text=Air+Purifier",
           description: "High-efficiency HEPA filter removes 99% of airborne particles.",
-          buy_link: "https://example.com/demo-air"
+          buy_link: "https://example.com/demo-air",
         },
         {
           id: "demo-sleep-1",
@@ -145,37 +139,42 @@ Rules:
           category: "Sleep",
           image: "https://via.placeholder.com/300x200?text=Gel+Pillow",
           description: "Keeps you cool and comfortable throughout the night.",
-          buy_link: "https://example.com/demo-sleep"
-        }
+          buy_link: "https://example.com/demo-sleep",
+        },
       ];
     }
 
-    // Merge with old products
+    // Merge with old products + safeguard duplicates
     let oldProducts = [];
     try {
       const file = await getFile(FILE_PATH);
       oldProducts = JSON.parse(Buffer.from(file.content, "base64").toString());
     } catch {}
 
-    const merged = [...oldProducts, ...newProducts];
+    const ids = new Set(oldProducts.map((p) => p.id));
+    const merged = [
+      ...oldProducts,
+      ...newProducts.filter((p) => !ids.has(p.id)),
+    ];
 
-    // ✅ Deduplicate by ID
-    const uniqueProducts = [];
-    const seen = new Set();
-    for (const p of merged) {
-      if (!seen.has(p.id)) {
-        seen.add(p.id);
-        uniqueProducts.push(p);
-      }
-    }
+    await saveFile(
+      FILE_PATH,
+      JSON.stringify(merged, null, 2),
+      "AI Auto-Update products.json"
+    );
 
-    await saveFile(FILE_PATH, JSON.stringify(uniqueProducts, null, 2), "AI Auto-Update products.json");
-
-    res.json({ success: true, products: uniqueProducts });
+    res.json({ success: true, products: merged });
   } catch (e) {
     console.error("POST /auto-update error:", e);
     res.status(500).json({ error: "Failed AI auto-update" });
   }
 });
 
-app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
+// --- 🚦 Health Check ---
+app.get("/status", (req, res) => {
+  res.json({ ok: true, message: "Empire gatekeeper is strong 💪" });
+});
+
+app.listen(PORT, () =>
+  console.log(`✅ Server running on http://localhost:${PORT}`)
+);
