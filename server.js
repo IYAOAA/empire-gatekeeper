@@ -62,9 +62,7 @@ app.get("/products", async (req, res) => {
 
 // --- POST product ---
 app.post("/products", async (req, res) => {
-  if (req.headers["x-admin-secret"] !== ADMIN_SECRET)
-    return res.status(403).json({ error: "Forbidden" });
-
+  if (req.headers["x-admin-secret"] !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
   try {
     const newProduct = req.body;
     let products = [];
@@ -83,9 +81,7 @@ app.post("/products", async (req, res) => {
 
 // --- ✅ AI Auto-Update ---
 app.post("/auto-update", async (req, res) => {
-  if (req.headers["x-admin-secret"] !== ADMIN_SECRET)
-    return res.status(403).json({ error: "Forbidden" });
-
+  if (req.headers["x-admin-secret"] !== ADMIN_SECRET) return res.status(403).json({ error: "Forbidden" });
   try {
     const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
       method: "POST",
@@ -98,21 +94,22 @@ app.post("/auto-update", async (req, res) => {
         messages: [
           {
             role: "system",
-            content: `You are a smart product curator.  
-Return ONLY a JSON array of exactly 2 **trending, realistic home-related products**.  
-Each product must strictly include these fields:  
-- id (short unique string, no spaces)  
-- title (short, catchy name)  
-- category (choose from: Furniture, Kitchen, Tech, Decor, Air, Sleep, Cleaning)  
-- image (valid https image URL)  
-- description (1 short, engaging sentence)  
-- buy_link (valid https product URL)  
+            content: `You are a product curator. Return EXACTLY 2 unique home-related products in a JSON array.
+Each product MUST include: 
+- id (short unique string, use dashes not spaces),
+- title,
+- category,
+- image (direct link, not base64),
+- description (max 25 words),
+- buy_link (valid https link).
 
-⚠️ Do not include any extra text, explanation, or markdown. Output must be a raw JSON array only.`
+Rules:
+- IDs must never duplicate across runs.
+- Output ONLY the raw JSON array, no extra text.`,
           },
           { role: "user", content: "Generate 2 trending home products now." },
         ],
-        temperature: 0.5,
+        temperature: 0.4,
       }),
     });
 
@@ -130,7 +127,7 @@ Each product must strictly include these fields:
       newProducts = [];
     }
 
-    // --- 🚨 Fallback if AI gave nothing ---
+    // --- 🚨 FORCE fallback if AI gave nothing ---
     if (!Array.isArray(newProducts) || newProducts.length === 0) {
       console.warn("⚠️ AI gave empty result. Using demo products.");
       newProducts = [
@@ -140,7 +137,7 @@ Each product must strictly include these fields:
           category: "Air",
           image: "https://via.placeholder.com/300x200?text=Air+Purifier",
           description: "High-efficiency HEPA filter removes 99% of airborne particles.",
-          buy_link: "https://example.com/demo-air",
+          buy_link: "https://example.com/demo-air"
         },
         {
           id: "demo-sleep-1",
@@ -148,8 +145,8 @@ Each product must strictly include these fields:
           category: "Sleep",
           image: "https://via.placeholder.com/300x200?text=Gel+Pillow",
           description: "Keeps you cool and comfortable throughout the night.",
-          buy_link: "https://example.com/demo-sleep",
-        },
+          buy_link: "https://example.com/demo-sleep"
+        }
       ];
     }
 
@@ -159,11 +156,22 @@ Each product must strictly include these fields:
       const file = await getFile(FILE_PATH);
       oldProducts = JSON.parse(Buffer.from(file.content, "base64").toString());
     } catch {}
+
     const merged = [...oldProducts, ...newProducts];
 
-    await saveFile(FILE_PATH, JSON.stringify(merged, null, 2), "AI Auto-Update products.json");
+    // ✅ Deduplicate by ID
+    const uniqueProducts = [];
+    const seen = new Set();
+    for (const p of merged) {
+      if (!seen.has(p.id)) {
+        seen.add(p.id);
+        uniqueProducts.push(p);
+      }
+    }
 
-    res.json({ success: true, products: merged });
+    await saveFile(FILE_PATH, JSON.stringify(uniqueProducts, null, 2), "AI Auto-Update products.json");
+
+    res.json({ success: true, products: uniqueProducts });
   } catch (e) {
     console.error("POST /auto-update error:", e);
     res.status(500).json({ error: "Failed AI auto-update" });
