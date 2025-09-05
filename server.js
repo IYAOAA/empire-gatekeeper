@@ -13,7 +13,7 @@ app.use(cors());
 const PORT = process.env.PORT || 5000;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const REPO_OWNER = "IYAOAA";
-const REPO_NAME = "EverlastingMemories";
+const REPO_NAME = "1000HomeVibes";
 const FILE_PATH = "data/products.json";
 const ADMIN_SECRET = process.env.ADMIN_SECRET || "supersecretkey";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
