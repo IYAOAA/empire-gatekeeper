@@ -60,7 +60,7 @@ app.get("/products", async (req, res) => {
   }
 });
 
-// --- POST product ---
+// --- POST single product ---
 app.post("/products", async (req, res) => {
   if (req.headers["x-admin-secret"] !== ADMIN_SECRET)
     return res.status(403).json({ error: "Forbidden" });
@@ -77,6 +77,24 @@ app.post("/products", async (req, res) => {
   } catch (e) {
     console.error("POST /products error:", e);
     res.status(500).json({ error: "Failed to save product" });
+  }
+});
+
+// --- ✅ NEW: Update entire products list ---
+app.post("/update-products", async (req, res) => {
+  if (req.headers["x-admin-secret"] !== ADMIN_SECRET)
+    return res.status(403).json({ error: "Forbidden" });
+
+  try {
+    const products = req.body;
+    if (!Array.isArray(products))
+      return res.status(400).json({ error: "Invalid data format" });
+
+    await saveFile(FILE_PATH, JSON.stringify(products, null, 2), "Updated products.json");
+    res.json({ success: true, products });
+  } catch (e) {
+    console.error("POST /update-products error:", e);
+    res.status(500).json({ error: "Failed to update products" });
   }
 });
 
@@ -129,7 +147,7 @@ Do not include explanations, comments, or markdown fences.`,
           id: "demo-air-1",
           title: "Smart Home Air Purifier",
           category: "Air",
-          image: "https://via.placeholder.com/300x200?text=Air+Purifier",
+          image: "https://placehold.co/300x200?text=Air+Purifier",
           description: "High-efficiency HEPA filter removes 99% of airborne particles.",
           buy_link: "https://example.com/demo-air",
         },
@@ -137,7 +155,7 @@ Do not include explanations, comments, or markdown fences.`,
           id: "demo-sleep-1",
           title: "Cooling Gel Memory Foam Pillow",
           category: "Sleep",
-          image: "https://via.placeholder.com/300x200?text=Gel+Pillow",
+          image: "https://placehold.co/300x200?text=Gel+Pillow",
           description: "Keeps you cool and comfortable throughout the night.",
           buy_link: "https://example.com/demo-sleep",
         },
