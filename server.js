@@ -15,6 +15,7 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const REPO_OWNER = "IYAOAA";
 const REPO_NAME = "1000HomeVibes";
 const FILE_PATH = "data/products.json";
+const CLICKS_PATH = "data/clicks.json"; // ✅ new
 const ADMIN_SECRET = process.env.ADMIN_SECRET || "supersecretkey";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
@@ -185,6 +186,30 @@ Do not include explanations, comments, or markdown fences.`,
   } catch (e) {
     console.error("POST /auto-update error:", e);
     res.status(500).json({ error: "Failed AI auto-update" });
+  }
+});
+
+// --- ✅ Analytics: Track Clicks ---
+app.post("/track-click", async (req, res) => {
+  try {
+    const { productId, type = "click", timestamp = new Date().toISOString() } = req.body;
+    if (!productId) return res.status(400).json({ error: "Missing productId" });
+
+    let clicks = [];
+    try {
+      const file = await getFile(CLICKS_PATH);
+      if (file) clicks = JSON.parse(Buffer.from(file.content, "base64").toString());
+    } catch {}
+
+    const newClick = { productId, type, timestamp };
+    clicks.push(newClick);
+
+    await saveFile(CLICKS_PATH, JSON.stringify(clicks, null, 2), "Recorded click");
+
+    res.json({ success: true, click: newClick });
+  } catch (e) {
+    console.error("POST /track-click error:", e);
+    res.status(500).json({ error: "Failed to record click" });
   }
 });
 
