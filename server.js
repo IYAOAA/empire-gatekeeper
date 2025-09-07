@@ -212,6 +212,29 @@ app.post("/track-click", async (req, res) => {
     res.status(500).json({ error: "Failed to record click" });
   }
 });
+// --- ✅ Analytics Endpoint ---
+app.get("/analytics", async (req, res) => {
+  try {
+    // Load products
+    let products = [];
+    try {
+      const file = await getFile(FILE_PATH);
+      if (file) products = JSON.parse(Buffer.from(file.content, "base64").toString());
+    } catch {}
+
+    // Load clicks
+    let clicks = [];
+    try {
+      const file = await getFile("data/clicks.json");
+      if (file) clicks = JSON.parse(Buffer.from(file.content, "base64").toString());
+    } catch {}
+
+    res.json({ products, clicks });
+  } catch (e) {
+    console.error("GET /analytics error:", e);
+    res.status(500).json({ error: "Failed to load analytics" });
+  }
+});
 
 // --- 🚦 Health Check ---
 app.get("/status", (req, res) => {
