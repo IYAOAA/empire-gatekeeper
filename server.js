@@ -15,7 +15,7 @@ const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const REPO_OWNER = "IYAOAA";
 const REPO_NAME = "1000HomeVibes";
 const FILE_PATH = "data/products.json";
-const CLICKS_PATH = "data/clicks.json"; // ✅ new
+const CLICKS_PATH = "data/clicks.json";
 const ADMIN_SECRET = process.env.ADMIN_SECRET || "supersecretkey";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
@@ -70,10 +70,15 @@ app.post("/products", async (req, res) => {
     let products = [];
     try {
       const file = await getFile(FILE_PATH);
-      if (file) products = JSON.parse(Buffer.from(file.content, "base64").toString());
+      if (file)
+        products = JSON.parse(Buffer.from(file.content, "base64").toString());
     } catch {}
     products.push(newProduct);
-    await saveFile(FILE_PATH, JSON.stringify(products, null, 2), "Added product");
+    await saveFile(
+      FILE_PATH,
+      JSON.stringify(products, null, 2),
+      "Added product"
+    );
     res.json({ success: true, products });
   } catch (e) {
     console.error("POST /products error:", e);
@@ -91,7 +96,11 @@ app.post("/update-products", async (req, res) => {
     if (!Array.isArray(products))
       return res.status(400).json({ error: "Invalid data format" });
 
-    await saveFile(FILE_PATH, JSON.stringify(products, null, 2), "Updated products.json");
+    await saveFile(
+      FILE_PATH,
+      JSON.stringify(products, null, 2),
+      "Updated products.json"
+    );
     res.json({ success: true, products });
   } catch (e) {
     console.error("POST /update-products error:", e);
@@ -149,7 +158,8 @@ Do not include explanations, comments, or markdown fences.`,
           title: "Smart Home Air Purifier",
           category: "Air",
           image: "https://placehold.co/300x200?text=Air+Purifier",
-          description: "High-efficiency HEPA filter removes 99% of airborne particles.",
+          description:
+            "High-efficiency HEPA filter removes 99% of airborne particles.",
           buy_link: "https://example.com/demo-air",
         },
         {
@@ -189,44 +199,50 @@ Do not include explanations, comments, or markdown fences.`,
   }
 });
 
-// --- ✅ Analytics: Track Clicks ---
+// --- ✅ Track Clicks ---
 app.post("/track-click", async (req, res) => {
   try {
-    const { productId, type = "click", timestamp = new Date().toISOString() } = req.body;
-    if (!productId) return res.status(400).json({ error: "Missing productId" });
+    const { product_id } = req.body;
+    if (!product_id) return res.status(400).json({ error: "Missing product_id" });
 
     let clicks = [];
     try {
       const file = await getFile(CLICKS_PATH);
-      if (file) clicks = JSON.parse(Buffer.from(file.content, "base64").toString());
+      if (file)
+        clicks = JSON.parse(Buffer.from(file.content, "base64").toString());
     } catch {}
 
-    const newClick = { productId, type, timestamp };
-    clicks.push(newClick);
+    clicks.push({ product_id, timestamp: Date.now() });
 
-    await saveFile(CLICKS_PATH, JSON.stringify(clicks, null, 2), "Recorded click");
+    await saveFile(
+      CLICKS_PATH,
+      JSON.stringify(clicks, null, 2),
+      "Updated clicks.json"
+    );
 
-    res.json({ success: true, click: newClick });
+    res.json({ success: true });
   } catch (e) {
     console.error("POST /track-click error:", e);
     res.status(500).json({ error: "Failed to record click" });
   }
 });
-// --- ✅ Analytics Endpoint ---
+
+// --- ✅ Analytics endpoint ---
 app.get("/analytics", async (req, res) => {
   try {
-    // Load products
     let products = [];
+    let clicks = [];
+
     try {
       const file = await getFile(FILE_PATH);
-      if (file) products = JSON.parse(Buffer.from(file.content, "base64").toString());
+      if (file)
+        products = JSON.parse(Buffer.from(file.content, "base64").toString());
     } catch {}
 
-    // Load clicks
-    let clicks = [];
     try {
-      const file = await getFile("data/clicks.json");
-      if (file) clicks = JSON.parse(Buffer.from(file.content, "base64").toString());
+      const file = await getFile(CLICKS_PATH);
+      if (file)
+        clicks = JSON.parse(Buffer.from(file.content, "base64").toString());
     } catch {}
 
     res.json({ products, clicks });
