@@ -1,3 +1,4 @@
+// server.js (BACKEND UPGRADED)
 import express from "express";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
@@ -54,7 +55,16 @@ app.get("/products", async (req, res) => {
     const file = await getFile(FILE_PATH);
     if (!file) return res.json([]);
     const data = Buffer.from(file.content, "base64").toString();
-    res.json(JSON.parse(data));
+    let products = JSON.parse(data);
+
+    // always sort newest first if dateAdded present
+    products.sort((a, b) => {
+      const da = new Date(b.dateAdded || b.id);
+      const db = new Date(a.dateAdded || a.id);
+      return da - db;
+    });
+
+    res.json(products);
   } catch (e) {
     console.error("GET /products error:", e);
     res.status(500).json({ error: "Failed to load products" });
@@ -66,14 +76,28 @@ app.post("/products", async (req, res) => {
   if (req.headers["x-admin-secret"] !== ADMIN_SECRET)
     return res.status(403).json({ error: "Forbidden" });
   try {
-    const newProduct = req.body;
+    const newProduct = {
+      ...req.body,
+      dateAdded: Date.now(),
+      // ensure new fields present
+      image2: req.body.image2 || "",
+      image3: req.body.image3 || "",
+      video: req.body.video || "",
+      provider: req.body.provider || "Amazon",
+    };
+
     let products = [];
     try {
       const file = await getFile(FILE_PATH);
       if (file)
         products = JSON.parse(Buffer.from(file.content, "base64").toString());
     } catch {}
+
     products.push(newProduct);
+
+    // sort after push
+    products.sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0));
+
     await saveFile(
       FILE_PATH,
       JSON.stringify(products, null, 2),
@@ -86,15 +110,27 @@ app.post("/products", async (req, res) => {
   }
 });
 
-// --- ✅ NEW: Update entire products list ---
+// --- Update entire products list ---
 app.post("/update-products", async (req, res) => {
   if (req.headers["x-admin-secret"] !== ADMIN_SECRET)
     return res.status(403).json({ error: "Forbidden" });
 
   try {
-    const products = req.body;
+    let products = req.body;
     if (!Array.isArray(products))
       return res.status(400).json({ error: "Invalid data format" });
+
+    // ensure fields exist for each
+    products = products.map((p) => ({
+      ...p,
+      image2: p.image2 || "",
+      image3: p.image3 || "",
+      video: p.video || "",
+      provider: p.provider || "Amazon",
+      dateAdded: p.dateAdded || Date.now(),
+    }));
+
+    products.sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0));
 
     await saveFile(
       FILE_PATH,
@@ -108,98 +144,7 @@ app.post("/update-products", async (req, res) => {
   }
 });
 
-// --- ✅ AI Auto-Update ---
-app.post("/auto-update", async (req, res) => {
-  if (req.headers["x-admin-secret"] !== ADMIN_SECRET)
-    return res.status(403).json({ error: "Forbidden" });
-  try {
-    const aiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: `You are a strict JSON generator. 
-Return ONLY a JSON array with exactly 2 home-related products. 
-Each object MUST have: id, title, category, image, description, buy_link. 
-Do not include explanations, comments, or markdown fences.`,
-          },
-          { role: "user", content: "Generate 2 trending home products now." },
-        ],
-        temperature: 0.2,
-      }),
-    });
-
-    const data = await aiRes.json();
-    let text = data.choices?.[0]?.message?.content || "[]";
-
-    console.log("🤖 AI raw response:", text);
-
-    let newProducts = [];
-    try {
-      text = text.replace(/```json|```/g, "").trim();
-      newProducts = JSON.parse(text);
-    } catch (err) {
-      console.error("❌ Failed to parse AI:", err, text);
-      newProducts = [];
-    }
-
-    // --- 🚨 FORCE fallback if AI gave nothing ---
-    if (!Array.isArray(newProducts) || newProducts.length === 0) {
-      console.warn("⚠️ AI gave empty result. Using demo products.");
-      newProducts = [
-        {
-          id: "demo-air-1",
-          title: "Smart Home Air Purifier",
-          category: "Air",
-          image: "https://placehold.co/300x200?text=Air+Purifier",
-          description:
-            "High-efficiency HEPA filter removes 99% of airborne particles.",
-          buy_link: "https://example.com/demo-air",
-        },
-        {
-          id: "demo-sleep-1",
-          title: "Cooling Gel Memory Foam Pillow",
-          category: "Sleep",
-          image: "https://placehold.co/300x200?text=Gel+Pillow",
-          description: "Keeps you cool and comfortable throughout the night.",
-          buy_link: "https://example.com/demo-sleep",
-        },
-      ];
-    }
-
-    // Merge with old products + safeguard duplicates
-    let oldProducts = [];
-    try {
-      const file = await getFile(FILE_PATH);
-      oldProducts = JSON.parse(Buffer.from(file.content, "base64").toString());
-    } catch {}
-
-    const ids = new Set(oldProducts.map((p) => p.id));
-    const merged = [
-      ...oldProducts,
-      ...newProducts.filter((p) => !ids.has(p.id)),
-    ];
-
-    await saveFile(
-      FILE_PATH,
-      JSON.stringify(merged, null, 2),
-      "AI Auto-Update products.json"
-    );
-
-    res.json({ success: true, products: merged });
-  } catch (e) {
-    console.error("POST /auto-update error:", e);
-    res.status(500).json({ error: "Failed AI auto-update" });
-  }
-});
-
-// --- ✅ Track Clicks ---
+// --- Track Clicks ---
 app.post("/track-click", async (req, res) => {
   try {
     const { product_id } = req.body;
@@ -227,7 +172,7 @@ app.post("/track-click", async (req, res) => {
   }
 });
 
-// --- ✅ Analytics endpoint ---
+// --- Analytics endpoint ---
 app.get("/analytics", async (req, res) => {
   try {
     let products = [];
@@ -252,7 +197,7 @@ app.get("/analytics", async (req, res) => {
   }
 });
 
-// --- 🚦 Health Check ---
+// --- Health Check ---
 app.get("/status", (req, res) => {
   res.json({ ok: true, message: "Empire gatekeeper is strong 💪" });
 });
