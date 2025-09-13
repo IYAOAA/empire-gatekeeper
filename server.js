@@ -201,47 +201,6 @@ app.get("/analytics", async (req, res) => {
 app.get("/status", (req, res) => {
   res.json({ ok: true, message: "Empire gatekeeper is strong 💪" });
 });
-// --- Product Wisdom (separate storage) ---
-import fs from "fs";
-const WISDOM_PATH = "data/product-wisdom.json";
-
-// GET Wisdom products
-app.get("/product-wisdom", async (req, res) => {
-  try {
-    if (!fs.existsSync(WISDOM_PATH)) {
-      return res.json([]);
-    }
-    const raw = fs.readFileSync(WISDOM_PATH);
-    const wisdomProducts = JSON.parse(raw);
-    res.json(wisdomProducts);
-  } catch (e) {
-    console.error("GET /product-wisdom error:", e);
-    res.status(500).json({ error: "Failed to load wisdom products" });
-  }
-});
-
-// POST Wisdom product
-app.post("/product-wisdom", async (req, res) => {
-  try {
-    let wisdomProducts = [];
-    if (fs.existsSync(WISDOM_PATH)) {
-      wisdomProducts = JSON.parse(fs.readFileSync(WISDOM_PATH));
-    }
-    const newWisdom = {
-      ...req.body,
-      dateAdded: Date.now(),
-    };
-    wisdomProducts.push(newWisdom);
-    fs.writeFileSync(
-      WISDOM_PATH,
-      JSON.stringify(wisdomProducts, null, 2)
-    );
-    res.json({ success: true, wisdomProducts });
-  } catch (e) {
-    console.error("POST /product-wisdom error:", e);
-    res.status(500).json({ error: "Failed to save wisdom product" });
-  }
-});
 
 app.listen(PORT, () =>
   console.log(`✅ Server running on http://localhost:${PORT}`)
