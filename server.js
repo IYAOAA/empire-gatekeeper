@@ -1,4 +1,4 @@
-// server.js (BACKEND UPGRADED)
+// server.js (BACKEND with Product Wisdom fully integrated)
 import express from "express";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
@@ -17,7 +17,7 @@ const REPO_OWNER = "IYAOAA";
 const REPO_NAME = "1000HomeVibes";
 const FILE_PATH = "data/products.json";
 const CLICKS_PATH = "data/clicks.json";
-const WISDOM_PATH = "data/product-wisdom.json"; // ✅ added
+const WISDOM_PATH = "data/product-wisdom.json"; // ✅ new path for wisdom
 const ADMIN_SECRET = process.env.ADMIN_SECRET || "supersecretkey";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
@@ -58,12 +58,8 @@ app.get("/products", async (req, res) => {
     const data = Buffer.from(file.content, "base64").toString();
     let products = JSON.parse(data);
 
-    // always sort newest first if dateAdded present
-    products.sort((a, b) => {
-      const da = new Date(b.dateAdded || b.id);
-      const db = new Date(a.dateAdded || a.id);
-      return da - db;
-    });
+    // sort newest first
+    products.sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0));
 
     res.json(products);
   } catch (e) {
