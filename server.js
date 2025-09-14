@@ -1,4 +1,4 @@
-// server.js (BACKEND with Product Wisdom fully integrated)
+// server.js (BACKEND UPGRADED)
 import express from "express";
 import fetch from "node-fetch";
 import dotenv from "dotenv";
@@ -17,7 +17,6 @@ const REPO_OWNER = "IYAOAA";
 const REPO_NAME = "1000HomeVibes";
 const FILE_PATH = "data/products.json";
 const CLICKS_PATH = "data/clicks.json";
-const WISDOM_PATH = "data/product-wisdom.json"; // ✅ new path for wisdom
 const ADMIN_SECRET = process.env.ADMIN_SECRET || "supersecretkey";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
@@ -58,8 +57,12 @@ app.get("/products", async (req, res) => {
     const data = Buffer.from(file.content, "base64").toString();
     let products = JSON.parse(data);
 
-    // sort newest first
-    products.sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0));
+    // always sort newest first if dateAdded present
+    products.sort((a, b) => {
+      const da = new Date(b.dateAdded || b.id);
+      const db = new Date(a.dateAdded || a.id);
+      return da - db;
+    });
 
     res.json(products);
   } catch (e) {
@@ -76,6 +79,7 @@ app.post("/products", async (req, res) => {
     const newProduct = {
       ...req.body,
       dateAdded: Date.now(),
+      // ensure new fields present
       image2: req.body.image2 || "",
       image3: req.body.image3 || "",
       video: req.body.video || "",
@@ -90,6 +94,8 @@ app.post("/products", async (req, res) => {
     } catch {}
 
     products.push(newProduct);
+
+    // sort after push
     products.sort((a, b) => (b.dateAdded || 0) - (a.dateAdded || 0));
 
     await saveFile(
@@ -114,6 +120,7 @@ app.post("/update-products", async (req, res) => {
     if (!Array.isArray(products))
       return res.status(400).json({ error: "Invalid data format" });
 
+    // ensure fields exist for each
     products = products.map((p) => ({
       ...p,
       image2: p.image2 || "",
@@ -187,50 +194,6 @@ app.get("/analytics", async (req, res) => {
   } catch (e) {
     console.error("GET /analytics error:", e);
     res.status(500).json({ error: "Failed to load analytics" });
-  }
-});
-
-// --- NEW: Product Wisdom endpoints ---
-app.get("/product-wisdom", async (req, res) => {
-  try {
-    const file = await getFile(WISDOM_PATH);
-    if (!file) return res.json([]);
-    const data = Buffer.from(file.content, "base64").toString();
-    const wisdom = JSON.parse(data || "[]");
-    res.json(wisdom);
-  } catch (e) {
-    console.error("GET /product-wisdom error:", e);
-    res.status(500).json({ error: "Failed to load product-wisdom" });
-  }
-});
-
-app.post("/product-wisdom", async (req, res) => {
-  if (req.headers["x-admin-secret"] !== ADMIN_SECRET)
-    return res.status(403).json({ error: "Forbidden" });
-  try {
-    let wisdom = [];
-    try {
-      const file = await getFile(WISDOM_PATH);
-      if (file)
-        wisdom = JSON.parse(Buffer.from(file.content, "base64").toString());
-    } catch {}
-
-    const newItem = {
-      ...req.body,
-      dateAdded: Date.now(),
-    };
-    wisdom.push(newItem);
-
-    await saveFile(
-      WISDOM_PATH,
-      JSON.stringify(wisdom, null, 2),
-      "Updated product-wisdom.json"
-    );
-
-    res.json({ success: true, wisdom });
-  } catch (e) {
-    console.error("POST /product-wisdom error:", e);
-    res.status(500).json({ error: "Failed to save product-wisdom" });
   }
 });
 
