@@ -242,9 +242,15 @@ app.get("/status", (req, res) => {
   res.json({ ok: true, message: "Backend working 💪" });
 });
 // =============================
-// Product Wisdom Routes
+// Product Wisdom Routes (ESM version)
 // =============================
-const fs = require('fs');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const wisdomFile = path.join(__dirname, 'data', 'product-wisdom.json');
 
 // GET all wisdom
@@ -264,7 +270,10 @@ app.get('/product-wisdom', (req, res) => {
 // POST update wisdom (protected)
 app.post('/update-product-wisdom', (req, res) => {
   const adminSecret = req.headers['x-admin-secret'];
-  if (adminSecret !== process.env.ADMIN_SECRET && adminSecret !== 'your-admin-secret-here') {
+  if (
+    adminSecret !== process.env.ADMIN_SECRET &&
+    adminSecret !== 'your-admin-secret-here'
+  ) {
     return res.status(403).json({ error: 'Unauthorized' });
   }
 
