@@ -241,10 +241,6 @@ app.post("/product-wisdom", async (req, res) => {
 app.get("/status", (req, res) => {
   res.json({ ok: true, message: "Backend working 💪" });
 });
-
-app.listen(PORT, () =>
-  console.log(`✅ Server running on http://localhost:${PORT}`)
-);
 // =============================
 // Product Wisdom Routes
 // =============================
@@ -281,3 +277,7 @@ app.post('/update-product-wisdom', (req, res) => {
     res.status(500).json({ error: 'Server error writing wisdom file' });
   }
 });
+
+app.listen(PORT, () =>
+  console.log(`✅ Server running on http://localhost:${PORT}`)
+);
