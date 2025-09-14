@@ -235,6 +235,36 @@ app.post("/product-wisdom", async (req, res) => {
     console.error("POST /product-wisdom error:", e);
     res.status(500).json({ error: "Failed to save product-wisdom" });
   }
+});// --- Update ALL product-wisdom (from admin panel) ---
+app.post("/update-product-wisdom", async (req, res) => {
+  // ✅ Security: check admin secret
+  if (req.headers["x-admin-secret"] !== ADMIN_SECRET)
+    return res.status(403).json({ error: "Forbidden" });
+
+  try {
+    let wisdom = req.body;
+    // ✅ must be an array
+    if (!Array.isArray(wisdom))
+      return res.status(400).json({ error: "Invalid data format" });
+
+    // add defaults / dateAdded
+    wisdom = wisdom.map((item) => ({
+      ...item,
+      dateAdded: item.dateAdded || Date.now(),
+    }));
+
+    // ✅ save to GitHub
+    await saveFile(
+      WISDOM_PATH,
+      JSON.stringify(wisdom, null, 2),
+      "Updated product-wisdom.json"
+    );
+
+    res.json({ success: true, wisdom });
+  } catch (e) {
+    console.error("POST /update-product-wisdom error:", e);
+    res.status(500).json({ error: "Failed to update product-wisdom" });
+  }
 });
 
 // --- Health Check ---
