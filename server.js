@@ -245,3 +245,39 @@ app.get("/status", (req, res) => {
 app.listen(PORT, () =>
   console.log(`✅ Server running on http://localhost:${PORT}`)
 );
+// =============================
+// Product Wisdom Routes
+// =============================
+const fs = require('fs');
+const wisdomFile = path.join(__dirname, 'data', 'product-wisdom.json');
+
+// GET all wisdom
+app.get('/product-wisdom', (req, res) => {
+  try {
+    if (!fs.existsSync(wisdomFile)) {
+      return res.json([]); // empty array if file not found
+    }
+    const wisdomData = JSON.parse(fs.readFileSync(wisdomFile, 'utf8'));
+    res.json(wisdomData);
+  } catch (err) {
+    console.error('Error reading product-wisdom.json', err);
+    res.status(500).json({ error: 'Server error reading wisdom file' });
+  }
+});
+
+// POST update wisdom (protected)
+app.post('/update-product-wisdom', (req, res) => {
+  const adminSecret = req.headers['x-admin-secret'];
+  if (adminSecret !== process.env.ADMIN_SECRET && adminSecret !== 'your-admin-secret-here') {
+    return res.status(403).json({ error: 'Unauthorized' });
+  }
+
+  const newWisdom = req.body;
+  try {
+    fs.writeFileSync(wisdomFile, JSON.stringify(newWisdom, null, 2), 'utf8');
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Error writing product-wisdom.json', err);
+    res.status(500).json({ error: 'Server error writing wisdom file' });
+  }
+});
